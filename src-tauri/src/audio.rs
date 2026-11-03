@@ -53,7 +53,7 @@ fn pick_device(host: &cpal::Host, wanted: Option<&str>) -> Result<cpal::Device, 
                 return Ok(found);
             }
         }
-        eprintln!("[murmur] microphone \"{wanted}\" not found, using default");
+        eprintln!("[undertone] microphone \"{wanted}\" not found, using default");
     }
     host.default_input_device()
         .ok_or_else(|| "找不到麥克風，請確認麥克風已連接並允許應用程式存取".to_string())
@@ -95,7 +95,7 @@ pub fn start(
             Arc::new(Mutex::new(Vec::with_capacity(rate as usize * 30)));
 
         let err_fn = |err: cpal::Error| {
-            eprintln!("[murmur] audio stream error: {err}");
+            eprintln!("[undertone] audio stream error: {err}");
         };
 
         let stream_result: Result<cpal::Stream, String> = match sample_format {

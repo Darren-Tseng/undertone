@@ -31,7 +31,7 @@ def main() -> None:
     if compute_type == "auto":
         compute_type = "float16" if device == "cuda" else "int8"
 
-    root = os.environ.get("MURMUR_MODEL_DIR") or None
+    root = os.environ.get("UNDERTONE_MODEL_DIR") or None
     print(f"Downloading {args.model} for {device}/{compute_type} …")
     start = time.time()
     WhisperModel(args.model, device=device, compute_type=compute_type, download_root=root)

@@ -49,12 +49,12 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1
 
       - name: 建置 Tauri 安裝檔
-        run: npm run tauri build
+        run: npm run tauri build -- --config src-tauri/tauri.installer.conf.json
 
       - name: 上傳安裝檔
         uses: actions/upload-artifact@v4
         with:
-          name: murmur-windows-installer
+          name: undertone-windows-installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
 

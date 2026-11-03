@@ -270,7 +270,7 @@ export default function App() {
     return (
       <div className="boot-screen">
         <div className="boot-card">
-          <h1>Murmur 無法啟動</h1>
+          <h1>Undertone 無法啟動</h1>
           <p>{bootError}</p>
           <button
             type="button"
@@ -291,7 +291,7 @@ export default function App() {
           <div className="boot-mark">
             <WaveMark size={26} />
           </div>
-          <p>正在啟動 Murmur…</p>
+          <p>正在啟動 Undertone…</p>
         </div>
       </div>
     );
@@ -305,7 +305,7 @@ export default function App() {
             <WaveMark size={20} />
           </div>
           <div>
-            <div className="brand-name">Murmur</div>
+            <div className="brand-name">Undertone</div>
             <div className="brand-sub">本機語音聽寫</div>
           </div>
         </div>

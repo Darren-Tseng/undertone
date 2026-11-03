@@ -139,9 +139,9 @@ export const api = {
 
 export const events = {
   state: (cb: (payload: StatePayload) => void): Promise<UnlistenFn> =>
-    listen<StatePayload>("murmur://state", (event) => cb(event.payload)),
+    listen<StatePayload>("undertone://state", (event) => cb(event.payload)),
   transcript: (cb: (entry: TranscriptEntry) => void): Promise<UnlistenFn> =>
-    listen<TranscriptEntry>("murmur://transcript", (event) =>
+    listen<TranscriptEntry>("undertone://transcript", (event) =>
       cb(event.payload),
     ),
 };

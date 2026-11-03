@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Murmur sidecar.
+"""Undertone sidecar.
 
 A tiny local HTTP server that owns the faster-whisper model. The Tauri app
 spawns this process, posts raw WAV bytes to /transcribe, and gets plain text
@@ -77,7 +77,7 @@ _enable_bundled_cuda_libs()
 
 
 def log(message: str) -> None:
-    print(f"[murmur] {message}", file=sys.stderr, flush=True)
+    print(f"[undertone] {message}", file=sys.stderr, flush=True)
 
 
 _CJK = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
@@ -158,7 +158,7 @@ def get_model(model_name: str, device: str, compute_type: str):
             model_name,
             device=device,
             compute_type=compute_type,
-            download_root=os.environ.get("MURMUR_MODEL_DIR") or None,
+            download_root=os.environ.get("UNDERTONE_MODEL_DIR") or None,
         )
         _models[key] = model
         label = f"{model_name} ({device}/{compute_type})"
@@ -320,7 +320,7 @@ def transcribe(
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "MurmurSidecar/1.0"
+    server_version = "UndertoneSidecar/1.0"
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         log(f"{self.address_string()} {fmt % args}")
@@ -364,7 +364,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(
                 200,
                 {
-                    "app": "murmur-sidecar",
+                    "app": "undertone-sidecar",
                     "ok": True,
                     "pid": os.getpid(),
                     "python": sys.version.split()[0],
@@ -434,7 +434,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Murmur faster-whisper sidecar")
+    parser = argparse.ArgumentParser(description="Undertone faster-whisper sidecar")
     parser.add_argument("--port", type=int, default=8756)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()

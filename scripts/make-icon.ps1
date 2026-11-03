@@ -1,4 +1,4 @@
-﻿# Generates the Murmur app icon (1024x1024 PNG) with GDI+.
+﻿# Generates the Undertone app icon (1024x1024 PNG) with GDI+.
 # Run from the project root: powershell -ExecutionPolicy Bypass -File scripts/make-icon.ps1
 
 Add-Type -AssemblyName System.Drawing

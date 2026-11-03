@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Murmur is a Windows-first, local-only voice dictation app: React/Vite UI → Tauri 2 (Rust) → Python `faster-whisper` sidecar on `127.0.0.1:8756`. The folder is named `epicenter`, but the product, npm package, Rust crate, and identifier are **murmur** / `so.murmur.app`.
+Undertone is a Windows-first, local-only voice dictation app: React/Vite UI → Tauri 2 (Rust) → Python `faster-whisper` sidecar on `127.0.0.1:8756`. The folder is named `epicenter`, but the product, npm package, Rust crate, and identifier are **undertone** / `so.undertone.app`.
 
 ## Commands
 
@@ -11,7 +11,7 @@ Murmur is a Windows-first, local-only voice dictation app: React/Vite UI → Tau
 - `cargo check --manifest-path src-tauri/Cargo.toml` — fast Rust feedback (Tauri debug builds are slow).
 - First-time engine setup: `powershell -ExecutionPolicy Bypass -File scripts/setup.ps1` (or `npm run setup`). It creates `sidecar/.venv`, installs `requirements.txt`, and downloads the `small` model. Required before dictation works; the UI itself still boots without it.
 - Installer: `npm run installer`（先 PyInstaller 打包引擎，再 `tauri build`）→ `src-tauri/target/release/bundle/nsis/`. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and publishes the installer on GitHub Releases.
-- Bundled engine: `powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1` → `sidecar/dist/murmur-sidecar.exe`. `tauri.conf.json` maps it to `resources/sidecar/murmur-sidecar.exe`, so `npm run tauri build` fails if the exe has not been built. The installer ships without Whisper weights; the model downloads on first run.
+- Bundled engine: `powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1` → `sidecar/dist/undertone-sidecar.exe`. The engine is only referenced from `src-tauri/tauri.installer.conf.json` (merged with `--config` by `npm run installer`), so plain `cargo check` / `npm run app` work without it. The installer ships without Whisper weights; the model downloads on first run.
 
 There is no ESLint, Prettier, frontend test runner, or pre-commit config — do not invent those commands. The only CI is the release workflow.
 
@@ -21,7 +21,7 @@ There is no ESLint, Prettier, frontend test runner, or pre-commit config — do 
 - Windows assumptions are baked in: WASAPI capture via `cpal`, synthetic Ctrl+V via `enigo`, `explorer` for reveal, `taskkill /T` for the sidecar process tree.
 - No ffmpeg; the sidecar decodes with PyAV.
 - CUDA is optional. Missing cuBLAS/cuDNN falls back to CPU automatically; `server.py` probes with silence during warmup because the failure only appears on first real compute.
-- Settings: `%APPDATA%\so.murmur.app\settings.json`. Model cache: `%APPDATA%\so.murmur.app\models\` (exported to the sidecar as `MURMUR_MODEL_DIR`). Transcripts: `%USERPROFILE%\Murmur\transcripts\YYYY-MM-DD\HHMMSS.md` (workspace configurable).
+- Settings: `%APPDATA%\so.undertone.app\settings.json`. Model cache: `%APPDATA%\so.undertone.app\models\` (exported to the sidecar as `UNDERTONE_MODEL_DIR`). Transcripts: `%USERPROFILE%\Undertone\transcripts\YYYY-MM-DD\HHMMSS.md` (workspace configurable).
 
 ## Architecture / wiring
 
@@ -29,9 +29,9 @@ There is no ESLint, Prettier, frontend test runner, or pre-commit config — do 
 - All IPC is wrapped in `src/lib/api.ts`. A new Rust `#[tauri::command]` must also be added to `invoke_handler![...]` in `src-tauri/src/lib.rs`.
 - Serde uses `rename_all = "camelCase"`: Rust `auto_paste` ↔ TS `autoPaste` in both settings and runtime state.
 - Rust modules: `lib.rs` orchestration/state/commands, `audio.rs` recording, `sidecar.rs` process + HTTP lifecycle, `transcripts.rs` Markdown storage/search, `settings.rs` JSON persistence, `paste.rs` clipboard/keystroke.
-- Sidecar HTTP: `GET /health`, `GET /models`, `POST /warmup`, `POST /transcribe` (raw WAV body; model/language/device/compute_type as query params), `POST /shutdown`. `/health` only counts if `app == "murmur-sidecar"`.
+- Sidecar HTTP: `GET /health`, `GET /models`, `POST /warmup`, `POST /transcribe` (raw WAV body; model/language/device/compute_type as query params), `POST /shutdown`. `/health` only counts if `app == "undertone-sidecar"`.
 - Dev sidecar resolution order in `sidecar.rs`: bundled resource exe → `sidecar/.venv/Scripts/python.exe sidecar/server.py` → `settings.python_path` → `python`. If something healthy is already on the port, Rust reuses it instead of spawning; kill stray `python` processes on 8756 before testing spawn/lifecycle changes.
-- Events: `murmur://state` (dictation lifecycle) and `murmur://transcript` (new entry). UI state also comes from polling `get_runtime_state` — update both when changing dictation state.
+- Events: `undertone://state` (dictation lifecycle) and `undertone://transcript` (new entry). UI state also comes from polling `get_runtime_state` — update both when changing dictation state.
 
 ## Gotchas
 

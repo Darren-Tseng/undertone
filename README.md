@@ -1,4 +1,4 @@
-# Murmur
+# Undertone
 
 **本機優先的語音聽寫。** 按一下快捷鍵，說完話，文字直接出現在你正在使用的程式裡。
 
@@ -6,11 +6,11 @@
 逐字稿就是你磁碟上的一份純文字 Markdown。
 
 <p align="center">
-  <img src="app-icon.png" width="120" alt="Murmur icon" />
+  <img src="app-icon.png" width="120" alt="Undertone icon" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="860" alt="Murmur 語音聽寫介面" />
+  <img src="docs/screenshot.png" width="860" alt="Undertone 語音聽寫介面" />
 </p>
 
 ---
@@ -71,8 +71,8 @@
 
 ## 下載安裝檔
 
-到 [Releases](../../releases) 下載最新的 `Murmur_x.y.z_x64-setup.exe`，直接執行即可。
-安裝程式是 per-user 安裝（不需要管理員權限），完成後從開始功能表開啟 Murmur。
+到 [Releases](../../releases) 下載最新的 `Undertone_x.y.z_x64-setup.exe`，直接執行即可。
+安裝程式是 per-user 安裝（不需要管理員權限），完成後從開始功能表開啟 Undertone。
 
 - 安裝檔已內含轉錄引擎，**不需要另外安裝 Python**。
 - 第一次啟動會從 Hugging Face 下載 `small` 模型（約 480 MB），之後完全離線。
@@ -110,19 +110,19 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Model medium
 3. 說話。再按一次快捷鍵結束。
 4. 幾秒後文字會自動貼上，並同步存成逐字稿。
 
-也可以在 Murmur 視窗按麥克風按鈕操作。若不想自動貼上，可在設定關閉「自動貼上」，
+也可以在 Undertone 視窗按麥克風按鈕操作。若不想自動貼上，可在設定關閉「自動貼上」，
 文字仍會保留在剪貼簿。
 
-關閉主視窗時 Murmur 會縮到系統匣（托盤），按快捷鍵仍可聽寫；要完全結束請從系統匣選單
+關閉主視窗時 Undertone 會縮到系統匣（托盤），按快捷鍵仍可聽寫；要完全結束請從系統匣選單
 選擇「結束」。
 
 ## 資料放在哪裡
 
 | 內容 | 路徑 |
 | --- | --- |
-| 逐字稿 | `%USERPROFILE%\Murmur\transcripts\YYYY-MM-DD\HHMMSS.md` |
-| 設定 | `%APPDATA%\so.murmur.app\settings.json` |
-| 模型快取 | `%APPDATA%\so.murmur.app\models\` |
+| 逐字稿 | `%USERPROFILE%\Undertone\transcripts\YYYY-MM-DD\HHMMSS.md` |
+| 設定 | `%APPDATA%\so.undertone.app\settings.json` |
+| 模型快取 | `%APPDATA%\so.undertone.app\models\` |
 | 引擎日誌 | App 內「設定 → 引擎日誌」 |
 
 逐字稿格式：
@@ -173,17 +173,18 @@ npm run installer
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1
-npm run tauri build
+npm run tauri build -- --config src-tauri/tauri.installer.conf.json
 ```
 
 輸出會放在 `src-tauri/target/release/bundle/nsis/`。
 
-`tauri.conf.json` 的 `bundle.resources` 會把 `sidecar/dist/murmur-sidecar.exe`
-放進安裝檔的 `resources/sidecar/`，執行時 `sidecar.rs` 會優先使用它，
-所以使用者端不需要 Python。
+引擎 exe 只在 `src-tauri/tauri.installer.conf.json` 裡被加進 `bundle.resources`，
+會落到安裝檔的 `resources/sidecar/`，執行時 `sidecar.rs` 會優先使用它，
+所以使用者端不需要 Python。平常的 `tauri.conf.json` 刻意不引用它，
+這樣 `cargo check` 與 `npm run app` 不需要先打包引擎。
 
 > PyInstaller 打包 ctranslate2 / onnxruntime / PyAV 需要較長時間，產物約 200–300 MB。
-> 若打包後的 sidecar 缺少 DLL，先單獨執行 `sidecar\dist\murmur-sidecar.exe --port 8757`
+> 若打包後的 sidecar 缺少 DLL，先單獨執行 `sidecar\dist\undertone-sidecar.exe --port 8757`
 > 看缺哪個檔案，再把對應套件加進 `--collect-all` 清單。
 >
 > 開發模式（`npm run app`）會直接使用 `sidecar\.venv\Scripts\python.exe`，不需要先打包。
@@ -222,7 +223,7 @@ git push origin v0.1.0
 改用 `small` 或 `base` 模型、把裝置設為 CPU + int8，或安裝 CUDA / cuDNN 後切到 GPU。
 
 **貼上到錯的地方**
-Murmur 會貼到「目前取得焦點的視窗」。錄音期間請不要切換視窗；也可以關閉自動貼上，
+Undertone 會貼到「目前取得焦點的視窗」。錄音期間請不要切換視窗；也可以關閉自動貼上，
 改用剪貼簿手動貼。
 
 ## 隱私

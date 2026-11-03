@@ -110,7 +110,7 @@ pub fn is_known(id: &str) -> bool {
     CATALOG.iter().any(|spec| spec.id == id)
 }
 
-/// Primary model cache, matching `MURMUR_MODEL_DIR` used by the sidecar.
+/// Primary model cache, matching `UNDERTONE_MODEL_DIR` used by the sidecar.
 pub fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -125,7 +125,7 @@ fn cache_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
         roots.push(dir);
     }
 
-    // Older runs (or `download_model.py` without MURMUR_MODEL_DIR) may have
+    // Older runs (or `download_model.py` without UNDERTONE_MODEL_DIR) may have
     // used the default Hugging Face cache instead.
     if let Ok(home) = app.path().home_dir() {
         roots.push(home.join(".cache").join("huggingface").join("hub"));

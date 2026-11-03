@@ -14,7 +14,7 @@ $venv = Join-Path $sidecar ".venv"
 $venvPython = Join-Path $venv "Scripts\python.exe"
 
 Write-Host ""
-Write-Host "  Murmur · 本機轉錄引擎安裝" -ForegroundColor Green
+Write-Host "  Undertone · 本機轉錄引擎安裝" -ForegroundColor Green
 Write-Host "  ------------------------------"
 Write-Host ""
 
@@ -47,7 +47,7 @@ if ($LASTEXITCODE -ne 0) {
 
 if (-not $SkipModel) {
     Write-Host "  下載 Whisper 模型：$Model …"
-    $env:MURMUR_MODEL_DIR = Join-Path $env:APPDATA "so.murmur.app\models"
+    $env:UNDERTONE_MODEL_DIR = Join-Path $env:APPDATA "so.undertone.app\models"
     & $venvPython (Join-Path $sidecar "download_model.py") $Model
     if ($LASTEXITCODE -ne 0) {
         throw "模型下載失敗。你可以稍後在 App 內切換模型，或重新執行此腳本。"

@@ -68,8 +68,8 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         settings.workspace_dir = app
             .path()
             .home_dir()
-            .map(|home| home.join("Murmur"))
-            .unwrap_or_else(|_| PathBuf::from("Murmur"))
+            .map(|home| home.join("Undertone"))
+            .unwrap_or_else(|_| PathBuf::from("Undertone"))
             .to_string_lossy()
             .to_string();
     }

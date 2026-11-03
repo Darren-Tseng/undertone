@@ -52,7 +52,7 @@ struct RuntimeState {
 
 fn emit_state(app: &AppHandle, state: &str, message: Option<String>) {
     let _ = app.emit(
-        "murmur://state",
+        "undertone://state",
         serde_json::json!({ "state": state, "message": message }),
     );
 }
@@ -67,7 +67,7 @@ fn current_settings(app: &AppHandle) -> Result<settings::Settings, String> {
 }
 
 fn temp_wav_path() -> PathBuf {
-    std::env::temp_dir().join("murmur").join(format!(
+    std::env::temp_dir().join("undertone").join(format!(
         "rec-{}.wav",
         chrono::Local::now().format("%Y%m%d-%H%M%S-%3f")
     ))
@@ -198,7 +198,7 @@ fn stop_and_transcribe(app: AppHandle) {
 
         match result {
             Ok(entry) => {
-                let _ = app.emit("murmur://transcript", &entry);
+                let _ = app.emit("undertone://transcript", &entry);
                 emit_state(&app, "done", Some(entry.text.clone()));
 
                 let app_handle = app.clone();
@@ -284,7 +284,7 @@ async fn transcribe_recording(
         if let Ok(Err(err)) =
             tauri::async_runtime::spawn_blocking(move || paste::paste(&text)).await
         {
-            eprintln!("[murmur] paste failed: {err}");
+            eprintln!("[undertone] paste failed: {err}");
         }
     }
 
@@ -669,13 +669,13 @@ fn focus_main(app: &AppHandle) {
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(app, "show", "開啟 Murmur", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, "show", "開啟 Undertone", true, None::<&str>)?;
     let toggle_item = MenuItem::with_id(app, "toggle", "開始／停止聽寫", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "結束", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &toggle_item, &quit_item])?;
 
     let mut builder = TrayIconBuilder::new()
-        .tooltip("Murmur 語音聽寫")
+        .tooltip("Undertone 語音聽寫")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -762,7 +762,7 @@ pub fn run() {
                 "overlay",
                 tauri::WebviewUrl::App("index.html".into()),
             )
-            .title("Murmur")
+            .title("Undertone")
             .inner_size(340.0, 100.0)
             .resizable(false)
             .decorations(false)
@@ -776,7 +776,7 @@ pub fn run() {
             .build();
 
             if let Err(err) = overlay {
-                eprintln!("[murmur] failed to build overlay window: {err}");
+                eprintln!("[undertone] failed to build overlay window: {err}");
             }
 
             let hotkey = {
@@ -789,7 +789,7 @@ pub fn run() {
             };
 
             if let Err(err) = apply_hotkey(&handle, &hotkey) {
-                eprintln!("[murmur] hotkey registration failed: {err}");
+                eprintln!("[undertone] hotkey registration failed: {err}");
                 if let Ok(mut slot) = handle.state::<AppState>().hotkey_error.lock() {
                     *slot = Some(err);
                 }
@@ -808,7 +808,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building Murmur");
+        .expect("error while building Undertone");
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {

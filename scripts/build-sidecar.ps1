@@ -1,5 +1,5 @@
 ﻿# Builds a self-contained sidecar executable with PyInstaller.
-# The output (sidecar/dist/murmur-sidecar.exe) can be shipped with the app.
+# The output (sidecar/dist/undertone-sidecar.exe) can be shipped with the app.
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1
 
 $ErrorActionPreference = "Stop"
@@ -22,7 +22,7 @@ if ($LASTEXITCODE -ne 0) {
     --noconfirm `
     --clean `
     --onefile `
-    --name murmur-sidecar `
+    --name undertone-sidecar `
     --distpath (Join-Path $sidecar "dist") `
     --workpath (Join-Path $sidecar "build") `
     --specpath $sidecar `
@@ -37,7 +37,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "打包失敗。"
 }
 
-$exe = Join-Path $sidecar "dist\murmur-sidecar.exe"
+$exe = Join-Path $sidecar "dist\undertone-sidecar.exe"
 if (-not (Test-Path $exe)) {
     throw "打包完成但找不到 $exe。"
 }
@@ -45,7 +45,7 @@ if (-not (Test-Path $exe)) {
 $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 Write-Host ""
 Write-Host "完成：$exe（$sizeMb MB）" -ForegroundColor Green
-Write-Host "tauri.conf.json 的 bundle.resources 已經指向這個檔案，直接執行 npm run tauri build 即可。"
+Write-Host "tauri.installer.conf.json 已經把這個檔案映射到 resources/sidecar/，執行 npm run installer 即可產生安裝檔。"
 Write-Host "驗證引擎是否可獨立啟動："
-Write-Host "  sidecar\dist\murmur-sidecar.exe --port 8757"
+Write-Host "  sidecar\dist\undertone-sidecar.exe --port 8757"
 Write-Host ""

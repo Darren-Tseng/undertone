@@ -323,7 +323,7 @@ impl Sidecar {
         if let Ok(data_dir) = app.path().app_data_dir() {
             let model_dir = data_dir.join("models");
             let _ = std::fs::create_dir_all(&model_dir);
-            command.env("MURMUR_MODEL_DIR", model_dir);
+            command.env("UNDERTONE_MODEL_DIR", model_dir);
         }
         if let Some(dir) = cwd {
             command.current_dir(dir);
@@ -413,7 +413,7 @@ impl Sidecar {
         // 1. A PyInstaller-built sidecar bundled with the app.
         if let Ok(resource_dir) = app.path().resource_dir() {
             for dir in [resource_dir.join("sidecar"), resource_dir] {
-                for name in ["murmur-sidecar.exe", "murmur-sidecar"] {
+                for name in ["undertone-sidecar.exe", "undertone-sidecar"] {
                     let exe = dir.join(name);
                     if exe.exists() {
                         candidates.push((exe, vec!["--port".to_string(), port.clone()], None));
@@ -487,7 +487,7 @@ impl Sidecar {
         }
 
         Err(
-            "找不到本機轉錄引擎。安裝版請重新安裝 Murmur；從原始碼執行請先跑 scripts\\setup.ps1 安裝 Python 依賴。"
+            "找不到本機轉錄引擎。安裝版請重新安裝 Undertone；從原始碼執行請先跑 scripts\\setup.ps1 安裝 Python 依賴。"
                 .to_string(),
         )
     }
@@ -684,7 +684,7 @@ pub async fn health(port: u16) -> Option<serde_json::Value> {
         return None;
     }
     let value: serde_json::Value = response.json().await.ok()?;
-    if value.get("app").and_then(|app| app.as_str()) == Some("murmur-sidecar") {
+    if value.get("app").and_then(|app| app.as_str()) == Some("undertone-sidecar") {
         Some(value)
     } else {
         None

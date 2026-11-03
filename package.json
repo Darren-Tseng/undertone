@@ -1,5 +1,5 @@
 {
-  "name": "murmur",
+  "name": "undertone",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "app": "tauri dev",
     "setup": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1",
     "sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1",
-    "installer": "npm run sidecar && tauri build",
+    "installer": "npm run sidecar && tauri build --config src-tauri/tauri.installer.conf.json",
     "icon": "tauri icon app-icon.png"
   },
   "dependencies": {

@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn saves_lists_searches_and_deletes() {
-        let dir = std::env::temp_dir().join(format!("murmur-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("undertone-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let settings = test_settings(&dir);
 
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_text() {
-        let dir = std::env::temp_dir().join(format!("murmur-empty-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("undertone-empty-{}", std::process::id()));
         let settings = test_settings(&dir);
         let result = save(
             &settings,
@@ -277,8 +277,8 @@ mod tests {
 
     #[test]
     fn refuses_to_delete_outside_workspace() {
-        let dir = std::env::temp_dir().join(format!("murmur-guard-{}", std::process::id()));
-        let outside = std::env::temp_dir().join("murmur-outside.md");
+        let dir = std::env::temp_dir().join(format!("undertone-guard-{}", std::process::id()));
+        let outside = std::env::temp_dir().join("undertone-outside.md");
         fs::create_dir_all(&dir).unwrap();
         fs::write(&outside, "do not delete").unwrap();
 
