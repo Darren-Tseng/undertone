@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Murmur",
+  "version": "0.1.0",
+  "identifier": "so.murmur.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Murmur",
+        "width": 1020,
+        "height": 720,
+        "minWidth": 880,
+        "minHeight": 620,
+        "center": true,
+        "resizable": true,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Murmur",
+    "copyright": "Copyright © 2026 Murmur contributors",
+    "shortDescription": "本機優先的語音聽寫",
+    "longDescription": "Murmur 是 Windows 上完全離線的語音聽寫工具：按下全域快捷鍵說話，文字直接貼到目前視窗，逐字稿存成純文字 Markdown。",
+    "licenseFile": "../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../sidecar/dist/murmur-sidecar.exe": "sidecar/murmur-sidecar.exe"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

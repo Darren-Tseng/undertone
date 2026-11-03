@@ -1,0 +1,2 @@
+# Local transcription engine. No network needed after the first model download.
+faster-whisper>=1.2.0,<2
