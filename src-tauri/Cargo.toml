@@ -1,6 +1,6 @@
 [package]
 name = "undertone"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first voice dictation for Windows"
 authors = ["Undertone"]
 edition = "2021"

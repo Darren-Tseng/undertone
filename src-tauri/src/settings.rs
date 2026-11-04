@@ -18,13 +18,21 @@ pub struct Settings {
     pub compute_type: String,
     pub auto_paste: bool,
     pub copy_to_clipboard: bool,
+    /// When false, transcriptions are pasted/copied but not written to disk.
+    pub save_transcripts: bool,
     pub max_record_secs: u32,
+    /// Minutes of GPU inactivity before the engine releases VRAM (0 = never).
+    pub gpu_idle_minutes: u32,
     pub input_device: Option<String>,
     pub workspace_dir: String,
     pub sidecar_port: u16,
     pub initial_prompt: String,
     /// Optional override for the Python interpreter.
     pub python_path: String,
+    /// auto | light | dark
+    pub theme: String,
+    /// ask | minimize | quit — what the main window's close button does.
+    pub close_action: String,
 }
 
 impl Default for Settings {
@@ -37,12 +45,16 @@ impl Default for Settings {
             compute_type: "auto".into(),
             auto_paste: true,
             copy_to_clipboard: true,
+            save_transcripts: true,
             max_record_secs: 300,
+            gpu_idle_minutes: 10,
             input_device: None,
             workspace_dir: String::new(),
             sidecar_port: 8756,
             initial_prompt: "以下是繁體中文的逐字稿，請使用繁體中文與正確的標點符號。".into(),
             python_path: String::new(),
+            theme: "auto".into(),
+            close_action: "ask".into(),
         }
     }
 }
@@ -76,6 +88,14 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
 
     if settings.max_record_secs == 0 {
         settings.max_record_secs = 300;
+    }
+
+    if settings.gpu_idle_minutes > 1440 {
+        settings.gpu_idle_minutes = 1440;
+    }
+
+    if !matches!(settings.close_action.as_str(), "ask" | "minimize" | "quit") {
+        settings.close_action = "ask".to_string();
     }
 
     settings

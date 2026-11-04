@@ -3,7 +3,10 @@ import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import Overlay from "./Overlay";
+import { applyCachedTheme } from "./lib/theme";
 import "./styles.css";
+
+applyCachedTheme();
 
 let windowLabel = "";
 try {

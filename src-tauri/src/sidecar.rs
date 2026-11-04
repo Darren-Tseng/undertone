@@ -35,6 +35,7 @@ pub struct EngineDetails {
     pub loaded_models: Vec<String>,
     pub loading_models: Vec<String>,
     pub last_error: Option<String>,
+    pub cuda_installing: bool,
     pub active_model: Option<String>,
     pub device: Option<String>,
     pub compute_type: Option<String>,
@@ -175,15 +176,27 @@ impl Sidecar {
         details.loaded_models = json_strings(health, "loadedModels");
         details.loading_models = json_strings(health, "loadingModels");
         details.last_error = json_string(health, "lastError");
+        details.cuda_installing = health
+            .get("cudaInstall")
+            .and_then(|value| value.get("state"))
+            .and_then(|value| value.as_str())
+            == Some("running");
 
         // The loaded label looks like `small (cuda/float16)`; prefer the actual
-        // device over the requested one (`auto`).
+        // device over the requested one (`auto`). If both a CPU and a CUDA
+        // copy are resident (GPU idle release), report the GPU one.
         if let Some(active) = details.active_model.clone() {
-            if let Some(label) = details
+            let gpu_label = details
                 .loaded_models
                 .iter()
-                .find(|label| label_matches_model(label, &active))
-            {
+                .find(|label| label_matches_model(label, &active) && label.contains("(cuda/"));
+            let label = gpu_label.or_else(|| {
+                details
+                    .loaded_models
+                    .iter()
+                    .find(|label| label_matches_model(label, &active))
+            });
+            if let Some(label) = label {
                 if let Some((device, compute)) = parse_model_label(label) {
                     details.device = Some(device);
                     details.compute_type = Some(compute);
@@ -236,6 +249,7 @@ impl Sidecar {
             details.faster_whisper = None;
             details.cuda_devices = 0;
             details.uptime = None;
+            details.cuda_installing = false;
             details.loaded_models.clear();
             details.loading_models.clear();
         }
@@ -324,6 +338,11 @@ impl Sidecar {
             let model_dir = data_dir.join("models");
             let _ = std::fs::create_dir_all(&model_dir);
             command.env("UNDERTONE_MODEL_DIR", model_dir);
+
+            // Runtime-downloaded CUDA DLLs (settings → 下載 GPU 元件).
+            let cuda_dir = data_dir.join("cuda");
+            let _ = std::fs::create_dir_all(&cuda_dir);
+            command.env("UNDERTONE_CUDA_DIR", cuda_dir);
         }
         if let Some(dir) = cwd {
             command.current_dir(dir);
@@ -410,7 +429,41 @@ impl Sidecar {
         let port = settings.sidecar_port.to_string();
         let mut candidates: Vec<(PathBuf, Vec<String>, Option<PathBuf>)> = Vec::new();
 
-        // 1. A PyInstaller-built sidecar bundled with the app.
+        // 1. The source-tree virtualenv. Prefer it whenever it exists so a
+        //    checkout always runs the same engine as a release build, instead
+        //    of a stale bundled exe left under `target/` shadowing it. The
+        //    path is baked at compile time and does not exist on end-user
+        //    machines, so installed builds fall through to the bundled exe.
+        let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|root| root.join("sidecar"));
+        let dev_script = dev_dir
+            .as_ref()
+            .map(|dev| dev.join("server.py"))
+            .filter(|script| script.exists());
+        let dev_args = dev_script.as_ref().map(|script| {
+            vec![
+                script.to_string_lossy().to_string(),
+                "--port".to_string(),
+                port.clone(),
+            ]
+        });
+
+        if let (Some(dev), Some(args)) = (dev_dir.as_ref(), dev_args.as_ref()) {
+            let venv_python = dev
+                .join(".venv")
+                .join(if cfg!(windows) { "Scripts" } else { "bin" })
+                .join(if cfg!(windows) {
+                    "python.exe"
+                } else {
+                    "python"
+                });
+            if venv_python.exists() {
+                candidates.push((venv_python, args.clone(), Some(dev.clone())));
+            }
+        }
+
+        // 2. A PyInstaller-built sidecar bundled with the app.
         if let Ok(resource_dir) = app.path().resource_dir() {
             for dir in [resource_dir.join("sidecar"), resource_dir] {
                 for name in ["undertone-sidecar.exe", "undertone-sidecar"] {
@@ -422,42 +475,20 @@ impl Sidecar {
             }
         }
 
-        // 2. The development virtualenv next to the source tree.
-        let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(|root| root.join("sidecar"));
-        if let Some(dev) = dev_dir {
-            let script = dev.join("server.py");
-            if script.exists() {
-                let venv_python = dev
-                    .join(".venv")
-                    .join(if cfg!(windows) { "Scripts" } else { "bin" })
-                    .join(if cfg!(windows) {
-                        "python.exe"
-                    } else {
-                        "python"
-                    });
-
-                let mut args = vec![script.to_string_lossy().to_string()];
-                args.push("--port".to_string());
-                args.push(port.clone());
-
-                if venv_python.exists() {
-                    candidates.push((venv_python, args.clone(), Some(dev.clone())));
+        // 3. Source-tree script with an explicit or system interpreter. These
+        //    come after the bundled exe so a missing or broken venv does not
+        //    silently pick up a random Python installation.
+        if let (Some(dev), Some(args)) = (dev_dir.as_ref(), dev_args.as_ref()) {
+            if !settings.python_path.trim().is_empty() {
+                let explicit = PathBuf::from(settings.python_path.trim());
+                if explicit.exists() {
+                    candidates.push((explicit, args.clone(), Some(dev.clone())));
                 }
-
-                if !settings.python_path.trim().is_empty() {
-                    let explicit = PathBuf::from(settings.python_path.trim());
-                    if explicit.exists() {
-                        candidates.push((explicit, args.clone(), Some(dev.clone())));
-                    }
-                }
-
-                candidates.push((PathBuf::from("python"), args, Some(dev.clone())));
             }
+            candidates.push((PathBuf::from("python"), args.clone(), Some(dev.clone())));
         }
 
-        // 3. Explicit interpreter override with a bundled script.
+        // 4. Explicit interpreter override with a bundled script.
         if !settings.python_path.trim().is_empty() {
             let explicit = PathBuf::from(settings.python_path.trim());
             if explicit.exists() {
@@ -512,6 +543,7 @@ impl Sidecar {
                 ("language", settings.language.clone()),
                 ("device", settings.device.clone()),
                 ("compute_type", settings.compute_type.clone()),
+                ("gpu_idle_minutes", settings.gpu_idle_minutes.to_string()),
             ])
             .header("Content-Type", "audio/wav");
 
@@ -550,6 +582,25 @@ impl Sidecar {
         Ok(result)
     }
 
+    /// Push the GPU idle timeout to the sidecar without restarting it.
+    pub async fn configure_gpu_idle(&self, settings: &Settings) {
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        {
+            Ok(client) => client,
+            Err(_) => return,
+        };
+        let _ = client
+            .post(format!(
+                "http://127.0.0.1:{}/config",
+                settings.sidecar_port
+            ))
+            .query(&[("gpu_idle_minutes", settings.gpu_idle_minutes.to_string())])
+            .send()
+            .await;
+    }
+
     /// Ask the sidecar to load the model, then surface progress in the UI.
     pub async fn warmup(&self, settings: &Settings) {
         let port = settings.sidecar_port;
@@ -570,6 +621,7 @@ impl Sidecar {
                 ("model", settings.model.clone()),
                 ("device", settings.device.clone()),
                 ("compute_type", settings.compute_type.clone()),
+                ("gpu_idle_minutes", settings.gpu_idle_minutes.to_string()),
             ])
             .send()
             .await;
@@ -668,6 +720,52 @@ fn parse_model_label(label: &str) -> Option<(String, String)> {
     let inner = label.split_once(" (")?.1.trim_end_matches(')');
     let (device, compute) = inner.split_once('/')?;
     Some((device.to_string(), compute.to_string()))
+}
+
+/// `GET /cuda` — installation/progress details for the settings page.
+pub async fn cuda_status(port: u16) -> Option<serde_json::Value> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/cuda"))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json().await.ok()
+}
+
+/// `POST /cuda/install` — returns as soon as the download thread starts.
+pub async fn start_cuda_install(port: u16) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(format!("http://127.0.0.1:{port}/cuda/install"))
+        .send()
+        .await
+        .map_err(|e| format!("無法連線轉錄引擎：{e}"))?;
+
+    if response.status().is_success() {
+        return Ok(());
+    }
+
+    let raw = response.text().await.unwrap_or_default();
+    let message = serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or(raw);
+    Err(message)
 }
 
 pub async fn health(port: u16) -> Option<serde_json::Value> {

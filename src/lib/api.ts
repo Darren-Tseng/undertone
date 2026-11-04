@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type DictationState =
@@ -17,12 +18,18 @@ export interface Settings {
   computeType: string;
   autoPaste: boolean;
   copyToClipboard: boolean;
+  saveTranscripts: boolean;
   maxRecordSecs: number;
+  gpuIdleMinutes: number;
   inputDevice: string | null;
   workspaceDir: string;
   sidecarPort: number;
   initialPrompt: string;
   pythonPath: string;
+  /** auto | light | dark */
+  theme: string;
+  /** ask | minimize | quit — what the main window's close button does */
+  closeAction: string;
 }
 
 export interface TranscriptEntry {
@@ -57,6 +64,7 @@ export interface EngineDetails {
   loadedModels: string[];
   loadingModels: string[];
   lastError: string | null;
+  cudaInstalling: boolean;
   activeModel: string | null;
   device: string | null;
   computeType: string | null;
@@ -98,6 +106,21 @@ export interface ModelsOverview {
   downloadedCount: number;
 }
 
+export interface CudaInstallResult {
+  cudaDevices: number;
+  dir: string;
+  installedBytes: number;
+  files: number;
+  activeDevice: string;
+  message: string;
+}
+
+export interface CudaOverview {
+  dir: string;
+  installedBytes: number;
+  files: number;
+}
+
 export interface RuntimeState {
   recording: boolean;
   busy: boolean;
@@ -125,8 +148,11 @@ export const api = {
   listModels: () => invoke<ModelsOverview>("list_models"),
   prepareModel: (model: string) =>
     invoke<SidecarStatus>("prepare_model", { model }),
+  installCuda: () => invoke<CudaInstallResult>("install_cuda"),
   deleteModel: (id: string) => invoke<void>("delete_model", { id }),
   openModelsDir: () => invoke<void>("open_models_dir"),
+  cudaOverview: () => invoke<CudaOverview>("cuda_overview"),
+  openCudaDir: () => invoke<void>("open_cuda_dir"),
   devices: () => invoke<string[]>("list_input_devices"),
   transcripts: (query = "", limit = 200) =>
     invoke<TranscriptEntry[]>("list_transcripts", { query, limit }),
@@ -135,6 +161,10 @@ export const api = {
   copy: (text: string) => invoke<void>("copy_text", { text }),
   reveal: (path: string) => invoke<void>("reveal_transcript", { path }),
   openWorkspace: () => invoke<void>("open_workspace"),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
+  appVersion: () => getVersion(),
+  resolveClose: (action: "minimize" | "quit", remember: boolean) =>
+    invoke<void>("resolve_close", { action, remember }),
 };
 
 export const events = {
@@ -144,4 +174,6 @@ export const events = {
     listen<TranscriptEntry>("undertone://transcript", (event) =>
       cb(event.payload),
     ),
+  closeRequested: (cb: () => void): Promise<UnlistenFn> =>
+    listen("undertone://close-requested", () => cb()),
 };

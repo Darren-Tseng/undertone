@@ -23,6 +23,11 @@ def main() -> None:
         try:
             import ctranslate2
 
+            # 讓 ctranslate2 找得到 pip 裝的 cuBLAS/cuDNN（跟 server.py 同一份邏輯）。
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import server
+
+            server._enable_bundled_cuda_libs()
             device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
         except Exception:
             device = "cpu"

@@ -18,6 +18,30 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # onnxruntime and ctranslate2 ship native DLLs; onefile keeps distribution simple.
+# GPU 支援：若 venv 裡有 nvidia CUDA 套件就一起打包（約 +2 GB），
+# 這樣安裝版也能用 GPU；沒有的話打包為 CPU 版（缺少 CUDA 時引擎自動退回 CPU）。
+$collectArgs = @(
+    "--collect-all", "faster_whisper",
+    "--collect-all", "ctranslate2",
+    "--collect-all", "onnxruntime",
+    "--collect-all", "tokenizers",
+    "--collect-all", "av"
+)
+foreach ($pkg in @("nvidia-cublas-cu12", "nvidia-cudnn-cu12", "nvidia-cuda-runtime-cu12", "nvidia-cuda-nvrtc-cu12")) {
+    & $venvPython -m pip show $pkg *> $null
+    if ($LASTEXITCODE -eq 0) {
+        $importName = switch ($pkg) {
+            "nvidia-cublas-cu12" { "nvidia.cublas" }
+            "nvidia-cudnn-cu12" { "nvidia.cudnn" }
+            "nvidia-cuda-runtime-cu12" { "nvidia.cuda_runtime" }
+            "nvidia-cuda-nvrtc-cu12" { "nvidia.cuda_nvrtc" }
+        }
+        $collectArgs += @("--collect-all", $importName)
+        Write-Host "  將打包 GPU 套件：$pkg"
+    } else {
+        Write-Host "  未安裝 $pkg，跳過（打包為 CPU 版）。"
+    }
+}
 & $venvPython -m PyInstaller `
     --noconfirm `
     --clean `
@@ -26,11 +50,7 @@ if ($LASTEXITCODE -ne 0) {
     --distpath (Join-Path $sidecar "dist") `
     --workpath (Join-Path $sidecar "build") `
     --specpath $sidecar `
-    --collect-all faster_whisper `
-    --collect-all ctranslate2 `
-    --collect-all onnxruntime `
-    --collect-all tokenizers `
-    --collect-all av `
+    @collectArgs `
     (Join-Path $sidecar "server.py")
 
 if ($LASTEXITCODE -ne 0) {

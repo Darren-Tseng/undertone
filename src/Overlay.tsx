@@ -5,6 +5,7 @@ import {
   type DictationState,
   type RuntimeState,
 } from "./lib/api";
+import { applyTheme } from "./lib/theme";
 import { formatTimer } from "./lib/format";
 import { AlertIcon, CheckIcon, SpinnerIcon } from "./components/icons";
 
@@ -30,6 +31,24 @@ function truncate(text: string, length: number) {
 export default function Overlay() {
   const [state, setState] = useState<OverlayState>({ state: "idle" });
   const [runtime, setRuntime] = useState<RuntimeState | null>(null);
+
+  // The overlay is a separate window, so it reads the saved theme itself.
+  useEffect(() => {
+    let alive = true;
+    let cleanup = () => {};
+    void api
+      .settings()
+      .then((settings) => {
+        if (alive) cleanup = applyTheme(settings.theme);
+      })
+      .catch(() => {
+        /* keep the cached theme */
+      });
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;

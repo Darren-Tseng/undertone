@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertIcon,
+  DownloadIcon,
   FolderIcon,
+  MonitorIcon,
+  MoonIcon,
   RefreshIcon,
   SpinnerIcon,
+  SunIcon,
   TrashIcon,
 } from "./icons";
 import { comboFromEvent, formatBytes, hotkeyParts } from "../lib/format";
 import {
   api,
+  type CudaOverview,
   type ModelInfo,
   type ModelsOverview,
   type RuntimeState,
@@ -20,9 +25,16 @@ interface Props {
   settings: Settings;
   runtime: RuntimeState | null;
   onSave: (next: Settings) => Promise<void>;
+  onThemeChange: (theme: string) => void;
   notify: (text: string, kind?: "ok" | "error") => void;
   onOpenWorkspace: () => void;
 }
+
+const THEME_OPTIONS = [
+  { value: "auto", label: "跟隨系統", icon: <MonitorIcon size={15} /> },
+  { value: "light", label: "亮色", icon: <SunIcon size={15} /> },
+  { value: "dark", label: "暗色", icon: <MoonIcon size={15} /> },
+] as const;
 
 const LANGUAGES: Array<{ value: string; label: string }> = [
   { value: "auto", label: "自動偵測" },
@@ -48,6 +60,12 @@ const COMPUTE_TYPES = [
   { value: "int8_float16", label: "int8_float16" },
   { value: "float16", label: "float16（GPU 建議）" },
   { value: "float32", label: "float32（最精確、最慢）" },
+];
+
+const CLOSE_ACTIONS = [
+  { value: "ask", label: "每次詢問" },
+  { value: "minimize", label: "最小化到系統匣" },
+  { value: "quit", label: "直接關閉應用程式" },
 ];
 
 function HotkeyInput({
@@ -129,6 +147,7 @@ export function SettingsPage({
   settings,
   runtime,
   onSave,
+  onThemeChange,
   notify,
   onOpenWorkspace,
 }: Props) {
@@ -142,9 +161,19 @@ export function SettingsPage({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [busyModel, setBusyModel] = useState<string | null>(null);
+  const [installingCuda, setInstallingCuda] = useState(false);
+  const [cuda, setCuda] = useState<CudaOverview | null>(null);
 
+  // Re-sync the draft when settings arrive from the backend. Unsaved edits are
+  // kept, except for the theme which is applied and stored on its own.
+  const syncedSettings = useRef<Settings>(settings);
   useEffect(() => {
-    setDraft(settings);
+    setDraft((current) =>
+      JSON.stringify(current) === JSON.stringify(syncedSettings.current)
+        ? settings
+        : { ...current, theme: settings.theme },
+    );
+    syncedSettings.current = settings;
   }, [settings]);
 
   const refreshDevices = useCallback(async () => {
@@ -186,6 +215,18 @@ export function SettingsPage({
   useEffect(() => {
     void refreshModels();
   }, [refreshModels, settings.model, engineSignature]);
+
+  const refreshCuda = useCallback(async () => {
+    try {
+      setCuda(await api.cudaOverview());
+    } catch {
+      /* leave the path blank; the rest of the page still works */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCuda();
+  }, [refreshCuda]);
 
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(settings),
@@ -257,9 +298,58 @@ export function SettingsPage({
     }
   };
 
+  const openCudaDir = async () => {
+    try {
+      await api.openCudaDir();
+    } catch (error) {
+      notify(String(error), "error");
+    }
+  };
+
+  const installCuda = async () => {
+    if (installingCuda || runtime?.sidecar.details?.cudaInstalling) {
+      return;
+    }
+    if (
+      !window.confirm(
+        `下載 NVIDIA CUDA 元件（cuBLAS／cuDNN，約 1.5 GB）？${
+          cuda?.dir ? `\n會存放到：${cuda.dir}` : ""
+        }\n下載完成後會自動切換到 GPU 並重新載入模型。`,
+      )
+    ) {
+      return;
+    }
+    setInstallingCuda(true);
+    try {
+      const result = await api.installCuda();
+      if (result.cudaDevices > 0) {
+        const next: Settings = {
+          ...draft,
+          device: "cuda",
+          computeType: "auto",
+        };
+        setDraft(next);
+        await onSave(next);
+        notify(result.message);
+      } else {
+        notify(result.message, "error");
+      }
+    } catch (error) {
+      notify(String(error), "error");
+    } finally {
+      setInstallingCuda(false);
+      void refreshCuda();
+    }
+  };
+
   const selectedModel = models?.models.find(
     (model) => model.id === draft.model,
   );
+  const cudaDevices = runtime?.sidecar.details?.cudaDevices ?? 0;
+  const cudaDownloading =
+    installingCuda || runtime?.sidecar.details?.cudaInstalling === true;
+  const cudaBusyMessage =
+    runtime?.sidecar.state === "loading" ? runtime.sidecar.message : null;
 
   return (
     <div className="page settings-page">
@@ -575,6 +665,94 @@ export function SettingsPage({
             </div>
           </div>
 
+          <div className="gpu-panel">
+            <div className="row-field">
+              <div>
+                <label>GPU 加速（NVIDIA CUDA）</label>
+                <p className="hint">
+                  {cudaDevices > 0
+                    ? `已偵測到 ${cudaDevices} 個 CUDA 裝置。`
+                    : "需要 NVIDIA 顯卡與最新驅動程式；會下載約 1.5 GB 的 cuBLAS／cuDNN。"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => void installCuda()}
+                disabled={cudaDownloading}
+              >
+                {cudaDownloading ? (
+                  <SpinnerIcon size={14} />
+                ) : (
+                  <DownloadIcon size={14} />
+                )}
+                {cudaDownloading
+                  ? "下載中…"
+                  : cudaDevices > 0
+                    ? "重新下載 GPU 元件"
+                    : "下載 GPU 元件"}
+              </button>
+            </div>
+            {cudaDownloading && cudaBusyMessage ? (
+              <p className="hint gpu-progress">{cudaBusyMessage}</p>
+            ) : null}
+          </div>
+
+          <div className="field">
+            <label>GPU 元件位置</label>
+            <div className="inline-field">
+              <input
+                className="input"
+                value={cuda?.dir ?? ""}
+                readOnly
+                spellCheck={false}
+                placeholder="正在取得資料夾路徑…"
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => void openCudaDir()}
+                disabled={!cuda?.dir}
+              >
+                <FolderIcon size={14} />
+                開啟
+              </button>
+            </div>
+            <p className="hint">
+              {cuda && cuda.files > 0
+                ? `已下載 ${cuda.files} 個 DLL，共 ${formatBytes(
+                    cuda.installedBytes,
+                  )}。移除這個資料夾即可清掉 GPU 元件。`
+                : "尚未下載 GPU 元件；下載後會放在這個資料夾。"}
+            </p>
+          </div>
+
+          <div className="field">
+            <label>GPU 閒置自動釋放</label>
+            <div className="inline-field">
+              <input
+                className="input narrow"
+                type="number"
+                min={0}
+                max={1440}
+                value={draft.gpuIdleMinutes}
+                onChange={(event) =>
+                  patch(
+                    "gpuIdleMinutes",
+                    Math.min(1440, Math.max(0, Number(event.target.value) || 0)),
+                  )
+                }
+              />
+              <span className="unit">分鐘</span>
+            </div>
+            <p className="hint">
+              {draft.device === "cpu"
+                ? "目前設定為 CPU，此選項不會有作用。"
+                : "使用 GPU 時，連續閒置超過此時間會釋放顯存；下次聽寫會先以 CPU 完成，再自動載回 GPU。設為 0 表示不釋放。"}
+            </p>
+          </div>
+
           <div className="field">
             <label>提示詞（進階）</label>
             <textarea
@@ -613,6 +791,69 @@ export function SettingsPage({
             <p className="hint">
               逐字稿會存到 <code>transcripts/YYYY-MM-DD/HHMMSS.md</code>。
             </p>
+          </div>
+
+          <div className="row-field">
+            <div>
+              <label>儲存逐字稿</label>
+              <p className="hint">
+                關閉後只會貼上或複製文字，不寫入資料夾，也不會出現在逐字稿列表。
+              </p>
+            </div>
+            <Switch
+              checked={draft.saveTranscripts}
+              onChange={(value) => patch("saveTranscripts", value)}
+            />
+          </div>
+        </section>
+
+        <section className="section-card">
+          <h3>視窗行為</h3>
+          <p className="card-sub">按下主視窗的關閉按鈕時要怎麼處理。</p>
+
+          <div className="field">
+            <label>關閉視窗時</label>
+            <select
+              className="input"
+              value={draft.closeAction}
+              onChange={(event) => patch("closeAction", event.target.value)}
+            >
+              {CLOSE_ACTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              最小化後程式仍在系統匣執行，全域快捷鍵可以繼續使用；選「每次詢問」時，關閉前會跳出確認對話框，可勾選「不再提示」記住選擇。
+            </p>
+          </div>
+        </section>
+
+        <section className="section-card span-2">
+          <div className="appearance-row">
+            <div>
+              <h3>外觀</h3>
+              <p className="card-sub">
+                配色會立即套用並自動儲存；選「跟隨系統」時，會隨 Windows 的亮暗模式切換。
+              </p>
+            </div>
+            <div className="segmented" role="radiogroup" aria-label="介面配色">
+              {THEME_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={
+                    (settings.theme || "auto") === option.value
+                  }
+                  onClick={() => onThemeChange(option.value)}
+                >
+                  {option.icon}
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 

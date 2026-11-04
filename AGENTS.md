@@ -29,15 +29,16 @@ There is no ESLint, Prettier, frontend test runner, or pre-commit config — do 
 - All IPC is wrapped in `src/lib/api.ts`. A new Rust `#[tauri::command]` must also be added to `invoke_handler![...]` in `src-tauri/src/lib.rs`.
 - Serde uses `rename_all = "camelCase"`: Rust `auto_paste` ↔ TS `autoPaste` in both settings and runtime state.
 - Rust modules: `lib.rs` orchestration/state/commands, `audio.rs` recording, `sidecar.rs` process + HTTP lifecycle, `transcripts.rs` Markdown storage/search, `settings.rs` JSON persistence, `paste.rs` clipboard/keystroke.
-- Sidecar HTTP: `GET /health`, `GET /models`, `POST /warmup`, `POST /transcribe` (raw WAV body; model/language/device/compute_type as query params), `POST /shutdown`. `/health` only counts if `app == "undertone-sidecar"`.
-- Dev sidecar resolution order in `sidecar.rs`: bundled resource exe → `sidecar/.venv/Scripts/python.exe sidecar/server.py` → `settings.python_path` → `python`. If something healthy is already on the port, Rust reuses it instead of spawning; kill stray `python` processes on 8756 before testing spawn/lifecycle changes.
+- Sidecar HTTP: `GET /health`, `GET /models`, `GET /cuda`, `POST /warmup`, `POST /config`, `POST /transcribe` (raw WAV body; model/language/device/compute_type as query params), `POST /cuda/install`, `POST /shutdown`. `/health` only counts if `app == "undertone-sidecar"`.
+- Sidecar resolution order in `sidecar.rs`: source-tree `sidecar/.venv/Scripts/python.exe sidecar/server.py` (when present) → bundled resource exe → `settings.python_path` → `python`. The venv wins so a checkout does not silently run a stale CPU-only exe under `target/debug/sidecar/`; installed builds have no source tree, so they use the bundled exe. If something healthy is already on the port, Rust reuses it instead of spawning; kill stray `python` processes on 8756 before testing spawn/lifecycle changes.
 - Events: `undertone://state` (dictation lifecycle) and `undertone://transcript` (new entry). UI state also comes from polling `get_runtime_state` — update both when changing dictation state.
 
 ## Gotchas
 
-- Closing the main window hides to the tray; it does not quit. Use the tray “結束” item (or kill the process) to stop the app.
+- Closing the main window follows `close_action` (`ask` shows an in-app confirmation dialog with a 不再提示 checkbox, `minimize` hides to the tray, `quit` exits). The tray “結束” item always quits.
 - Default hotkey is `Ctrl+Alt+Space`; one press starts, the next stops. Recording auto-stops at `max_record_secs` (clamped 5–3600, default 300).
 - Auto-paste targets whichever window has focus. Do not switch windows during recording. `auto_paste` and `copy_to_clipboard` are independent.
+- GPU idle release (`gpu_idle_minutes`, default 10, 0 = off): the sidecar drops its CUDA model after that many idle minutes and preloads the CPU model. The next dictation runs on CPU while the GPU model warms back up in the background; `/health` reports `gpuReleased` so the UI can say so.
 - All user-facing strings, including Rust error messages, are Traditional Chinese (zh-TW). Match that style for new UI and errors.
 - TypeScript is strict with `noUnusedLocals`/`noUnusedParameters`; `npm run build` fails on unused code.
 - Do not hand-edit generated/build output: `src-tauri/gen/`, `src-tauri/target/`, `dist/`, `sidecar/.venv/`, `sidecar/build/`, `sidecar/dist/`.

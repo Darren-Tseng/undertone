@@ -1,4 +1,5 @@
 mod audio;
+mod cuda;
 mod models;
 mod paste;
 mod settings;
@@ -9,7 +10,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -23,6 +24,7 @@ pub struct AppState {
     session: AtomicU64,
     sidecar: sidecar::Sidecar,
     hotkey_error: Mutex<Option<String>>,
+    cuda_installing: AtomicBool,
 }
 
 impl AppState {
@@ -35,6 +37,7 @@ impl AppState {
             session: AtomicU64::new(0),
             sidecar: sidecar::Sidecar::new(),
             hotkey_error: Mutex::new(None),
+            cuda_installing: AtomicBool::new(false),
         }
     }
 }
@@ -48,6 +51,12 @@ struct RuntimeState {
     level: f32,
     sidecar: sidecar::SidecarStatus,
     hotkey_error: Option<String>,
+}
+
+struct TranscriptionOutcome {
+    text: String,
+    /// Present only when the transcript was persisted to the workspace.
+    entry: Option<transcripts::TranscriptEntry>,
 }
 
 fn emit_state(app: &AppHandle, state: &str, message: Option<String>) {
@@ -66,6 +75,45 @@ fn current_settings(app: &AppHandle) -> Result<settings::Settings, String> {
     Ok(guard.clone())
 }
 
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn cuda_install_message(install: &serde_json::Value) -> String {
+    let phase = install
+        .get("phase")
+        .and_then(|value| value.as_str())
+        .unwrap_or("正在下載 GPU 元件…");
+    let downloaded = install
+        .get("downloadedBytes")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let total = install
+        .get("totalBytes")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    if total > 0 {
+        format!(
+            "{phase}（{} / {}）",
+            human_bytes(downloaded),
+            human_bytes(total)
+        )
+    } else {
+        phase.to_string()
+    }
+}
+
 fn temp_wav_path() -> PathBuf {
     std::env::temp_dir().join("undertone").join(format!(
         "rec-{}.wav",
@@ -82,6 +130,20 @@ fn apply_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     manager
         .register(shortcut)
         .map_err(|err| format!("無法註冊快捷鍵（可能被其他程式占用）：{err}"))
+}
+
+/// Keeps the native window chrome in step with the in-app theme.
+fn apply_theme(app: &AppHandle, theme: &str) {
+    let mode = match theme {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    };
+    for label in ["main", "overlay"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.set_theme(mode);
+        }
+    }
 }
 
 fn show_overlay(app: &AppHandle) {
@@ -197,9 +259,11 @@ fn stop_and_transcribe(app: AppHandle) {
         state.busy.store(false, Ordering::SeqCst);
 
         match result {
-            Ok(entry) => {
-                let _ = app.emit("undertone://transcript", &entry);
-                emit_state(&app, "done", Some(entry.text.clone()));
+            Ok(outcome) => {
+                if let Some(entry) = &outcome.entry {
+                    let _ = app.emit("undertone://transcript", entry);
+                }
+                emit_state(&app, "done", Some(outcome.text.clone()));
 
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -237,7 +301,7 @@ fn stop_and_transcribe(app: AppHandle) {
 async fn transcribe_recording(
     app: &AppHandle,
     recording: audio::Recording,
-) -> Result<transcripts::TranscriptEntry, String> {
+) -> Result<TranscriptionOutcome, String> {
     let state = app.state::<AppState>();
     let current = { state.settings.lock().map_err(|_| "設定鎖定失敗")?.clone() };
 
@@ -265,15 +329,19 @@ async fn transcribe_recording(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| current.language.clone());
 
-    let entry = transcripts::save(
-        &current,
-        transcripts::NewTranscript {
-            text: &text,
-            duration: recorded.duration,
-            model: &current.model,
-            language: &language,
-        },
-    )?;
+    let entry = if current.save_transcripts {
+        Some(transcripts::save(
+            &current,
+            transcripts::NewTranscript {
+                text: &text,
+                duration: recorded.duration,
+                model: &current.model,
+                language: &language,
+            },
+        )?)
+    } else {
+        None
+    };
 
     if current.copy_to_clipboard {
         let _ = paste::copy(&text);
@@ -288,7 +356,7 @@ async fn transcribe_recording(
         }
     }
 
-    Ok(entry)
+    Ok(TranscriptionOutcome { text, entry })
 }
 
 #[tauri::command]
@@ -313,6 +381,10 @@ async fn save_settings(
     next.workspace_dir = next.workspace_dir.trim().to_string();
     next.sidecar_port = next.sidecar_port.max(1024);
     next.max_record_secs = next.max_record_secs.clamp(5, 3600);
+    next.gpu_idle_minutes = next.gpu_idle_minutes.min(1440);
+    if !matches!(next.close_action.as_str(), "ask" | "minimize" | "quit") {
+        next.close_action = "ask".to_string();
+    }
 
     if next.hotkey.is_empty() {
         return Err("快捷鍵不可為空".to_string());
@@ -348,6 +420,10 @@ async fn save_settings(
         .lock()
         .map_err(|_| "設定鎖定失敗".to_string())? = next.clone();
 
+    if previous.theme != next.theme {
+        apply_theme(&app, &next.theme);
+    }
+
     if previous.sidecar_port != next.sidecar_port {
         state.sidecar.shutdown();
         let app_handle = app.clone();
@@ -374,6 +450,18 @@ async fn save_settings(
                 .state::<AppState>()
                 .sidecar
                 .warmup(&next_for_task)
+                .await;
+        });
+    }
+
+    if previous.gpu_idle_minutes != next.gpu_idle_minutes {
+        let app_handle = app.clone();
+        let next_for_task = next.clone();
+        tauri::async_runtime::spawn(async move {
+            app_handle
+                .state::<AppState>()
+                .sidecar
+                .configure_gpu_idle(&next_for_task)
                 .await;
         });
     }
@@ -480,8 +568,23 @@ async fn sidecar_status(app: AppHandle) -> Result<sidecar::SidecarStatus, String
                     })
                 })
                 .unwrap_or(false);
+            let gpu_released = health
+                .get("gpuReleased")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
 
-            if let Some(label) = loading_label {
+            let cuda_install = health.get("cudaInstall");
+            let cuda_running = cuda_install
+                .and_then(|value| value.get("state"))
+                .and_then(|value| value.as_str())
+                == Some("running");
+
+            if cuda_running {
+                let message = cuda_install
+                    .map(cuda_install_message)
+                    .unwrap_or_else(|| "正在下載 GPU 元件…".to_string());
+                sidecar.set_status("loading", message);
+            } else if let Some(label) = loading_label {
                 let model = label
                     .split(" (")
                     .next()
@@ -490,6 +593,13 @@ async fn sidecar_status(app: AppHandle) -> Result<sidecar::SidecarStatus, String
                     "loading",
                     format!("正在下載／載入 {model} 模型…"),
                 );
+            } else if gpu_released {
+                let message = if current.device == "cuda" {
+                    "GPU 已閒置釋放顯存；下次聽寫會重新載入 GPU 模型"
+                } else {
+                    "GPU 已閒置釋放顯存；下次聽寫會先用 CPU，之後自動回到 GPU"
+                };
+                sidecar.set_status("ready", message);
             } else if current_loaded {
                 sidecar.set_status("ready", format!("{} 模型已就緒", current.model));
             } else {
@@ -580,6 +690,16 @@ fn open_models_dir(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn cuda_overview(app: AppHandle) -> Result<cuda::CudaOverview, String> {
+    Ok(cuda::overview(&app))
+}
+
+#[tauri::command]
+fn open_cuda_dir(app: AppHandle) -> Result<(), String> {
+    cuda::open_dir(&app)
+}
+
+#[tauri::command]
 async fn prepare_model(
     app: AppHandle,
     model: String,
@@ -617,6 +737,187 @@ async fn prepare_model(
     }
 
     Ok(status)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CudaInstallResult {
+    cuda_devices: u32,
+    dir: String,
+    installed_bytes: u64,
+    files: u64,
+    /// `cuda` when the engine was switched over, otherwise the previous value.
+    active_device: String,
+    message: String,
+}
+
+/// Downloads the CUDA runtime (cuBLAS/cuDNN) into the app data folder and
+/// restarts the engine on the GPU. No Python/pip required, so this also works
+/// with the PyInstaller sidecar shipped in the installer.
+#[tauri::command]
+async fn install_cuda(app: AppHandle) -> Result<CudaInstallResult, String> {
+    {
+        let state = app.state::<AppState>();
+        if state.cuda_installing.swap(true, Ordering::SeqCst) {
+            return Err("GPU 元件正在下載中，請稍候再試。".to_string());
+        }
+    }
+
+    let result = install_cuda_inner(&app).await;
+    app.state::<AppState>()
+        .cuda_installing
+        .store(false, Ordering::SeqCst);
+    result
+}
+
+async fn install_cuda_inner(app: &AppHandle) -> Result<CudaInstallResult, String> {
+    if !cfg!(windows) {
+        return Err("GPU 加速僅支援 Windows。".to_string());
+    }
+
+    let current = current_settings(app)?;
+
+    {
+        let state = app.state::<AppState>();
+        state.sidecar.ensure_started(app, &current).await?;
+    }
+    sidecar::start_cuda_install(current.sidecar_port).await?;
+    app.state::<AppState>()
+        .sidecar
+        .set_status("loading", "正在取得 CUDA 套件資訊…");
+
+    let deadline = Instant::now() + Duration::from_secs(45 * 60);
+    let status = loop {
+        if Instant::now() > deadline {
+            return Err("下載 GPU 元件逾時，請檢查網路連線後重試。".to_string());
+        }
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        let Some(status) = sidecar::cuda_status(current.sidecar_port).await else {
+            continue;
+        };
+        let install = status.get("install");
+        let install_state = install
+            .and_then(|value| value.get("state"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let message = install
+            .map(cuda_install_message)
+            .unwrap_or_else(|| "正在下載 GPU 元件…".to_string());
+        app.state::<AppState>()
+            .sidecar
+            .set_status("loading", message);
+
+        if install_state == "error" {
+            let error = install
+                .and_then(|value| value.get("error"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("下載 GPU 元件失敗")
+                .to_string();
+            app.state::<AppState>()
+                .sidecar
+                .set_status("error", error.clone());
+            return Err(error);
+        }
+        if install_state == "done" {
+            break status;
+        }
+    };
+
+    let mut cuda_devices = status
+        .get("cudaDevices")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as u32;
+    let mut dir = status
+        .get("dir")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut installed_bytes = status
+        .get("installedBytes")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let mut files = status
+        .get("files")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    let mut target = current.clone();
+    if cuda_devices > 0 {
+        target.device = "cuda".to_string();
+        target.compute_type = "auto".to_string();
+    }
+
+    // Always restart: the download ran in the old process, and a fresh
+    // interpreter is the reliable way to pick up the new DLL directories.
+    {
+        let state = app.state::<AppState>();
+        state.sidecar.shutdown();
+        state.sidecar.ensure_started(app, &target).await?;
+    }
+
+    // ctranslate2 may only see the downloaded DLLs in the new process.
+    if let Some(refreshed) = sidecar::cuda_status(current.sidecar_port).await {
+        cuda_devices = refreshed
+            .get("cudaDevices")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as u32;
+        dir = refreshed
+            .get("dir")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        installed_bytes = refreshed
+            .get("installedBytes")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(installed_bytes);
+        files = refreshed
+            .get("files")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(files);
+    }
+
+    let cuda_ready = cuda_devices > 0;
+    if cuda_ready {
+        target.device = "cuda".to_string();
+        target.compute_type = "auto".to_string();
+    } else {
+        target.device = current.device.clone();
+        target.compute_type = current.compute_type.clone();
+    }
+
+    app.state::<AppState>()
+        .sidecar
+        .set_status("loading", "正在重新載入模型…");
+    let app_handle = (*app).clone();
+    let target_for_task = target.clone();
+    tauri::async_runtime::spawn(async move {
+        app_handle
+            .state::<AppState>()
+            .sidecar
+            .warmup(&target_for_task)
+            .await;
+    });
+
+    let message = if cuda_ready {
+        format!(
+            "GPU 元件已下載（{} 個 DLL，{}），已切換到 CUDA，正在重新載入模型。",
+            files,
+            human_bytes(installed_bytes)
+        )
+    } else {
+        "GPU 元件已下載，但偵測不到 CUDA 裝置。請更新 NVIDIA 驅動程式並重新啟動 App。"
+            .to_string()
+    };
+
+    Ok(CudaInstallResult {
+        cuda_devices,
+        dir,
+        installed_bytes,
+        files,
+        active_device: target.device.clone(),
+        message,
+    })
 }
 
 #[tauri::command]
@@ -658,6 +959,62 @@ fn reveal_transcript(path: String) -> Result<(), String> {
 fn open_workspace(app: AppHandle) -> Result<(), String> {
     let current = current_settings(&app)?;
     transcripts::open_workspace(&current)
+}
+
+/// Opens an http(s) link in the user's default browser.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let url = url.trim();
+    let looks_like_url = url.starts_with("https://") || url.starts_with("http://");
+    if !looks_like_url || url.chars().any(|c| c.is_whitespace() || c == '"') {
+        return Err("只允許開啟 http(s) 連結".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // No shell involved, so `&` and other cmd metacharacters stay intact.
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn()
+            .map_err(|e| format!("無法開啟連結：{e}"))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("無法開啟連結：{e}"))?;
+    }
+    Ok(())
+}
+
+/// Applies the answer from the "close window" dialog. `remember` persists the
+/// choice so the dialog stops appearing.
+#[tauri::command]
+fn resolve_close(app: AppHandle, action: String, remember: bool) -> Result<(), String> {
+    if !matches!(action.as_str(), "minimize" | "quit") {
+        return Err("未知的關閉選項".to_string());
+    }
+
+    if remember {
+        let mut next = current_settings(&app)?;
+        next.close_action = action.clone();
+        settings::save(&app, &next)?;
+        *app.state::<AppState>()
+            .settings
+            .lock()
+            .map_err(|_| "設定鎖定失敗".to_string())? = next;
+    }
+
+    if action == "quit" {
+        app.exit(0);
+    } else if let Some(window) = app.get_webview_window("main") {
+        window
+            .hide()
+            .map_err(|err| format!("無法最小化視窗：{err}"))?;
+    }
+
+    Ok(())
 }
 
 fn focus_main(app: &AppHandle) {
@@ -745,13 +1102,18 @@ pub fn run() {
             list_models,
             delete_model,
             open_models_dir,
+            cuda_overview,
+            open_cuda_dir,
             prepare_model,
+            install_cuda,
             list_input_devices,
             list_transcripts,
             delete_transcript,
             copy_text,
             reveal_transcript,
             open_workspace,
+            open_url,
+            resolve_close,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -779,6 +1141,10 @@ pub fn run() {
                 eprintln!("[undertone] failed to build overlay window: {err}");
             }
 
+            if let Ok(settings) = handle.state::<AppState>().settings.lock() {
+                apply_theme(&handle, &settings.theme);
+            }
+
             let hotkey = {
                 let state = handle.state::<AppState>();
                 state
@@ -801,9 +1167,31 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
+                if window.label() != "main" {
+                    return;
+                }
+                api.prevent_close();
+
+                let app = window.app_handle();
+                let close_action = app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .map(|settings| settings.close_action.clone())
+                    .unwrap_or_else(|_| "ask".to_string());
+
+                match close_action.as_str() {
+                    "quit" => app.exit(0),
+                    "minimize" => {
+                        let _ = window.hide();
+                    }
+                    _ => {
+                        // Make sure the confirmation dialog is visible.
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = app.emit("undertone://close-requested", ());
+                    }
                 }
             }
         })

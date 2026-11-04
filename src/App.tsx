@@ -7,22 +7,26 @@ import {
   type Settings,
   type TranscriptEntry,
 } from "./lib/api";
+import { applyTheme } from "./lib/theme";
 import {
   SIDECAR_STATE_LABEL,
   deviceLabel,
   hotkeyParts,
 } from "./lib/format";
 import { DictatePage } from "./components/DictatePage";
+import { AboutPage } from "./components/AboutPage";
+import { CloseDialog } from "./components/CloseDialog";
 import { HistoryPage } from "./components/HistoryPage";
 import { SettingsPage } from "./components/SettingsPage";
 import {
   HistoryIcon,
+  InfoIcon,
   MicIcon,
   SettingsIcon,
   WaveMark,
 } from "./components/icons";
 
-type Page = "dictate" | "history" | "settings";
+type Page = "dictate" | "history" | "settings" | "about";
 type Toast = { id: number; text: string; kind: "ok" | "error" };
 
 const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
@@ -38,6 +42,10 @@ const PAGE_META: Record<Page, { title: string; subtitle: string }> = {
     title: "設定",
     subtitle: "模型、快捷鍵與資料位置都留在這台電腦上",
   },
+  about: {
+    title: "關於",
+    subtitle: "Undertone 是什麼、資料放在哪裡，以及相關連結",
+  },
 };
 
 export default function App() {
@@ -52,6 +60,7 @@ export default function App() {
     message: string | null;
   }>({ state: "idle", message: null });
   const [toast, setToast] = useState<Toast | null>(null);
+  const [closePrompt, setClosePrompt] = useState(false);
 
   const toastTimer = useRef<number | null>(null);
   const searchRef = useRef("");
@@ -78,6 +87,13 @@ export default function App() {
   useEffect(() => {
     searchRef.current = search;
   }, [search]);
+
+  // Appearance: apply the saved theme, and keep "auto" in sync with the OS.
+  const themeMode = settings?.theme;
+  useEffect(() => {
+    if (!themeMode) return;
+    return applyTheme(themeMode);
+  }, [themeMode]);
 
   // Boot: settings + transcript index.
   useEffect(() => {
@@ -179,6 +195,22 @@ export default function App() {
     };
   }, [loadItems, notify]);
 
+  // The Rust side asks before closing the main window when close_action is
+  // "ask"; answer it with `api.resolveClose`.
+  useEffect(() => {
+    let disposed = false;
+    let off: (() => void) | null = null;
+    void (async () => {
+      const unlisten = await events.closeRequested(() => setClosePrompt(true));
+      if (disposed) unlisten();
+      else off = unlisten;
+    })();
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, []);
+
   // Search on the history page (debounced).
   useEffect(() => {
     if (page !== "history") return;
@@ -208,6 +240,27 @@ export default function App() {
       notify(String(error), "error");
     }
   };
+
+  const cancelClose = useCallback(() => setClosePrompt(false), []);
+
+  const resolveClose = useCallback(
+    async (action: "minimize" | "quit", remember: boolean) => {
+      setClosePrompt(false);
+      try {
+        await api.resolveClose(action, remember);
+        if (remember) {
+          // Keep the in-app settings in step with what Rust just persisted, so
+          // a later "儲存設定" does not silently re-enable the prompt.
+          setSettings((current) =>
+            current ? { ...current, closeAction: action } : current,
+          );
+        }
+      } catch (error) {
+        notify(String(error), "error");
+      }
+    },
+    [notify],
+  );
 
   const copyEntry = async (entry: TranscriptEntry) => {
     try {
@@ -255,6 +308,25 @@ export default function App() {
     }
   };
 
+  // Theme flips are applied immediately and persisted on their own, so the
+  // appearance picker does not depend on the settings "儲存" button.
+  const changeTheme = useCallback(
+    async (theme: string) => {
+      if (!settings || settings.theme === theme) return;
+      const previous = settings;
+      const next = { ...settings, theme };
+      setSettings(next);
+      try {
+        const saved = await api.saveSettings(next);
+        setSettings(saved);
+      } catch (error) {
+        setSettings(previous);
+        notify(String(error), "error");
+      }
+    },
+    [settings, notify],
+  );
+
   const status = runtime?.sidecar.state ?? "stopped";
   const engineDetails = runtime?.sidecar.details;
   const engineModel = engineDetails?.activeModel || settings?.model || "small";
@@ -265,6 +337,9 @@ export default function App() {
     engineCompute && engineCompute !== "auto" ? `/${engineCompute}` : ""
   }`;
   const meta = PAGE_META[page];
+  const closeDialog = closePrompt ? (
+    <CloseDialog onResolve={resolveClose} onCancel={cancelClose} />
+  ) : null;
 
   if (bootError) {
     return (
@@ -280,6 +355,7 @@ export default function App() {
             重試
           </button>
         </div>
+        {closeDialog}
       </div>
     );
   }
@@ -293,6 +369,7 @@ export default function App() {
           </div>
           <p>正在啟動 Undertone…</p>
         </div>
+        {closeDialog}
       </div>
     );
   }
@@ -335,6 +412,14 @@ export default function App() {
           >
             <SettingsIcon size={17} />
             設定
+          </button>
+          <button
+            type="button"
+            className={page === "about" ? "active" : ""}
+            onClick={() => setPage("about")}
+          >
+            <InfoIcon size={17} />
+            關於
           </button>
         </nav>
 
@@ -416,12 +501,19 @@ export default function App() {
               settings={settings}
               runtime={runtime}
               onSave={saveSettings}
+              onThemeChange={changeTheme}
               notify={notify}
               onOpenWorkspace={openWorkspace}
             />
           ) : null}
+
+          {page === "about" ? (
+            <AboutPage settings={settings} notify={notify} />
+          ) : null}
         </div>
       </main>
+
+      {closeDialog}
 
       {toast ? (
         <div className={`toast ${toast.kind}`} key={toast.id}>

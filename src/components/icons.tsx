@@ -54,6 +54,16 @@ export function SettingsIcon({ size = 18 }: IconProps) {
   );
 }
 
+export function InfoIcon({ size = 18 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11v5.5" />
+      <path d="M12 7.6h.01" />
+    </svg>
+  );
+}
+
 export function CopyIcon({ size = 16 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
@@ -117,6 +127,16 @@ export function RefreshIcon({ size = 16 }: IconProps) {
   );
 }
 
+export function DownloadIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M12 3.5v10" />
+      <path d="m8 10 4 4 4-4" />
+      <path d="M4.5 16.5v2A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-2" />
+    </svg>
+  );
+}
+
 export function ExternalIcon({ size = 16 }: IconProps) {
   return (
     <svg {...svgProps(size)}>
@@ -151,6 +171,40 @@ export function SpinnerIcon({ size = 18 }: IconProps) {
   return (
     <svg {...svgProps(size)} className="spin">
       <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
+  );
+}
+
+export function SunIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2" />
+      <path d="M12 19.5v2" />
+      <path d="M2.5 12h2" />
+      <path d="M19.5 12h2" />
+      <path d="M5.2 5.2l1.4 1.4" />
+      <path d="M17.4 17.4l1.4 1.4" />
+      <path d="M18.8 5.2l-1.4 1.4" />
+      <path d="M6.6 17.4l-1.4 1.4" />
+    </svg>
+  );
+}
+
+export function MoonIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2Z" />
+    </svg>
+  );
+}
+
+export function MonitorIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...svgProps(size)}>
+      <rect x="2.8" y="4.5" width="18.4" height="12" rx="2" />
+      <path d="M9 20h6" />
+      <path d="M12 16.5V20" />
     </svg>
   );
 }
