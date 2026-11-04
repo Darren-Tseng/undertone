@@ -71,10 +71,24 @@ if ($wantGpu) {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  警告：GPU 套件安裝失敗，仍可繼續用 CPU。" -ForegroundColor Yellow
     } else {
-        $cudaCount = & $venvPython -c "import sys; sys.path.insert(0, '$sidecar'); import server; server._enable_bundled_cuda_libs(); import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null
-        Write-Host "  ctranslate2 偵測到 CUDA 裝置：$cudaCount 個"
-        if ($cudaCount -eq "0") {
-            Write-Host "  警告：抓不到 CUDA 裝置，請更新 NVIDIA 驅動後重試；目前仍可用 CPU。" -ForegroundColor Yellow
+        # 這裡會匯入 ctranslate2；缺少 cuDNN 時它會把警告寫到 stderr，而
+        # $ErrorActionPreference = "Stop" 下重新導向的 stderr 會變成終止錯誤，
+        # 所以先放寬設定，改用 $LASTEXITCODE 判斷。路徑用 r'...' 避免 Python 把
+        # 反斜線當成跳脫字元（會噴 DeprecationWarning）。
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $cudaCount = & $venvPython -c "import sys; sys.path.insert(0, r'$sidecar'); import server; server._enable_bundled_cuda_libs(); import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cudaCount)) {
+            Write-Host "  警告：無法偵測 CUDA 裝置，請更新 NVIDIA 驅動後重試；目前仍可用 CPU。" -ForegroundColor Yellow
+        } else {
+            Write-Host "  ctranslate2 偵測到 CUDA 裝置：$cudaCount 個"
+            if ("$cudaCount".Trim() -eq "0") {
+                Write-Host "  警告：抓不到 CUDA 裝置，請更新 NVIDIA 驅動後重試；目前仍可用 CPU。" -ForegroundColor Yellow
+            }
         }
     }
 }

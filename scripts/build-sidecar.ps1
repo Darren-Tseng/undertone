@@ -27,16 +27,41 @@ $collectArgs = @(
     "--collect-all", "tokenizers",
     "--collect-all", "av"
 )
+# 一次問完已安裝的 GPU 套件。不用 `pip show`：缺少套件時 pip 會把警告寫到 stderr，
+# 而 Windows PowerShell 5.1 在 $ErrorActionPreference = "Stop" 下會把重新導向的
+# stderr 當成終止錯誤（NativeCommandError），導致建置直接失敗。
+# 注意：這段 Python 只用單引號，因為 Windows PowerShell 5.1 傳參數給原生程式時
+# 會弄壞內嵌的雙引號。
+$gpuProbe = @'
+import importlib.metadata as metadata
+
+for dist, module in [
+    ('nvidia-cublas-cu12', 'nvidia.cublas'),
+    ('nvidia-cudnn-cu12', 'nvidia.cudnn'),
+    ('nvidia-cuda-runtime-cu12', 'nvidia.cuda_runtime'),
+    ('nvidia-cuda-nvrtc-cu12', 'nvidia.cuda_nvrtc'),
+]:
+    try:
+        metadata.version(dist)
+    except metadata.PackageNotFoundError:
+        continue
+    print(dist + '=' + module)
+'@
+
+$gpuModules = @{}
+$probeOutput = & $venvPython -c $gpuProbe
+if ($LASTEXITCODE -ne 0) {
+    throw "無法檢查 GPU 套件是否已安裝。"
+}
+foreach ($line in @($probeOutput)) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    $dist, $module = $line -split "=", 2
+    $gpuModules[$dist] = $module
+}
+
 foreach ($pkg in @("nvidia-cublas-cu12", "nvidia-cudnn-cu12", "nvidia-cuda-runtime-cu12", "nvidia-cuda-nvrtc-cu12")) {
-    & $venvPython -m pip show $pkg *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $importName = switch ($pkg) {
-            "nvidia-cublas-cu12" { "nvidia.cublas" }
-            "nvidia-cudnn-cu12" { "nvidia.cudnn" }
-            "nvidia-cuda-runtime-cu12" { "nvidia.cuda_runtime" }
-            "nvidia-cuda-nvrtc-cu12" { "nvidia.cuda_nvrtc" }
-        }
-        $collectArgs += @("--collect-all", $importName)
+    if ($gpuModules.ContainsKey($pkg)) {
+        $collectArgs += @("--collect-all", $gpuModules[$pkg])
         Write-Host "  將打包 GPU 套件：$pkg"
     } else {
         Write-Host "  未安裝 $pkg，跳過（打包為 CPU 版）。"
